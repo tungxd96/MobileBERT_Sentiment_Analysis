@@ -161,16 +161,24 @@ mobile_bert_tokenizer = MobileBertTokenizer.from_pretrained(
 mobile_bert_model = MobileBertModel.from_pretrained(PRETRAINED_MODEL_NAME)
 
 # Preprocessing Data
+labels_heading = get_labels()
+features_heading = get_features()
+
 input_ids, token_type_ids, attention_mask, sentiment_labels, df = preprocessing_data(
-    features=get_features(),
-    labels=get_labels()
+    features=features_heading,
+    labels=labels_heading
 )
 
+# Train MobileBERT model
+print('Training MobileBERT model...')
 last_hidden_states = mobile_bert_model(
     input_ids=input_ids,
     attention_mask=attention_mask
 )
-print(last_hidden_states[0][:5,:5,:5])
+
+features = last_hidden_states[0][:,0,:].numpy()
+
+print(features)
 
 # X_train, X_test, y_train, y_test = train_test_split()
 
