@@ -16,3 +16,5 @@ b = [[0, 1, 2], [3, 4, 5]]
 # c = torch.tensor(np.array(a))
 d = tf.constant(b)
 print(d.numpy())
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device)

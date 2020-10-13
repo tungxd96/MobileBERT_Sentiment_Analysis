@@ -1,7 +1,7 @@
 from transformers import MobileBertTokenizer
 from transformers.modeling_mobilebert import MobileBertModel
 
-from config import PRETRAINED_MODEL_NAME, DATASET_PATH, MODEL_MAX_LENGTH, PADDING
+import config
 
 import pandas as pd
 import os
@@ -12,7 +12,7 @@ import tensorflow as tf
 import torch
 
 from sklearn.model_selection import train_test_split
-from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
 
 def setup_progress_bar(title='', maxval=0):
     if len(title) > 0:
@@ -30,9 +30,9 @@ def setup_progress_bar(title='', maxval=0):
 def get_max_length(column=''):
     max_length = 0
 
-    for filename in os.listdir(DATASET_PATH):
+    for filename in os.listdir(config.DATASET_PATH):
         if filename.endswith('.csv'):
-            path = os.path.join(DATASET_PATH, filename)
+            path = os.path.join(config.DATASET_PATH, filename)
             df = pd.read_csv(path)
 
             bar = setup_progress_bar(
@@ -66,68 +66,55 @@ def preprocessing_data(features=[], labels=[]):
     tokenized_token_type_ids = []
     tokenized_attention_mask = []
     sentiment_labels = []
+    labeled_scores = []
     input_ids_padding_length = 0
     attention_mask_padding_length = 0
     max_length = get_max_length(column=text_feature)
+    memory_size = int(config.MEMORY_1_GB / 10)
 
-    for filename in os.listdir(DATASET_PATH):
+    for filename in os.listdir(config.DATASET_PATH):
         if filename.endswith('.csv'):
-            path = os.path.join(DATASET_PATH, filename)
+            path = os.path.join(config.DATASET_PATH, filename)
             df = pd.read_csv(path)
             df = df[headers]
 
-            bar = setup_progress_bar(
-                title='Encoding text tokens',
-                maxval=len(df[text_feature])
+            tokenized_input_ids, tokenized_token_type_ids, tokenized_attention_mask = preprocessing_features(
+                df_features=df[text_feature],
+                tokenized_input_ids=tokenized_input_ids,
+                tokenized_token_type_ids=tokenized_token_type_ids,
+                tokenized_attention_mask=tokenized_attention_mask,
+                memory_size=memory_size,
+                max_length=max_length
             )
-            bar.start()
 
-            for i, sentence in enumerate(df[text_feature]):
-                if i >= 100: break
-                encoded_input = mobile_bert_tokenizer.encode_plus(
-                    sentence,
-                    max_length=max_length,
-                    add_special_tokens=True,
-                    padding=True,
-                    return_attention_mask=True,
-                    # return_tensors='tf'
-                )
+            sentiment_labels, labels_score = preprocessing_labels(
+                labeled_headings=labels,
+                sentiment_labels=sentiment_labels,
+                labeled_scores=labeled_scores,
+                df=df,
+                memory_size=memory_size
+            )
 
-                input_ids = encoded_input['input_ids']
-                token_type_ids = encoded_input['token_type_ids']
-                attention_mask = encoded_input['attention_mask']
-
-                input_ids_padding_length += max_length - len(input_ids)
-                attention_mask_padding_length += max_length - len(attention_mask)
-
-                tokenized_input_ids.append(input_ids)
-                tokenized_token_type_ids.append(token_type_ids)
-                tokenized_attention_mask.append(attention_mask)
-
-                bar.update(i+1)
-
-            sentiment_labels.append(df[labels])
-            bar.finish()
             break
 
     bar = setup_progress_bar(
-        title='Padding input_ids and attention_mask',
-        maxval=input_ids_padding_length+attention_mask_padding_length
+        title='Padding input_ids and attention_mask...',
+        maxval=len(tokenized_input_ids)+len(tokenized_attention_mask)
     )
     padding_progress = 0
     bar.start()
 
     for input_ids in tokenized_input_ids:
         for i in range(len(input_ids), max_length):
-            input_ids.append(PADDING)
-            padding_progress += 1
-            bar.update(padding_progress)
+            input_ids.append(config.PADDING)
+        padding_progress += 1
+        bar.update(padding_progress)
 
     for attention_mask in tokenized_attention_mask:
         for i in range(len(attention_mask), max_length):
-            attention_mask.append(PADDING)
-            padding_progress += 1
-            bar.update(padding_progress)
+            attention_mask.append(config.PADDING)
+        padding_progress += 1
+        bar.update(padding_progress)
 
     bar.finish()
 
@@ -135,9 +122,93 @@ def preprocessing_data(features=[], labels=[]):
         torch.tensor(np.array(tokenized_input_ids)),
         tokenized_token_type_ids,
         torch.tensor(np.array(tokenized_attention_mask)),
-        sentiment_labels,
-        df
+        np.array(labeled_scores)
     )
+
+
+def preprocessing_features(
+    df_features=[], 
+    tokenized_input_ids=[], 
+    tokenized_token_type_ids=[], 
+    tokenized_attention_mask=[],
+    memory_size=100,
+    max_length=512
+):
+    bar = setup_progress_bar(
+        title='Preprocessing features',
+        maxval=len(df_features)
+    )
+    bar.start()
+
+    for i, sentence in enumerate(df_features):
+        if i >= memory_size:
+            break
+
+        encoded_input = mobile_bert_tokenizer.encode_plus(
+            sentence,
+            max_length=max_length,
+            add_special_tokens=True,
+            padding=True,
+            return_attention_mask=True
+        )
+
+        input_ids = encoded_input['input_ids']
+        token_type_ids = encoded_input['token_type_ids']
+        attention_mask = encoded_input['attention_mask']
+
+        tokenized_input_ids.append(input_ids)
+        tokenized_token_type_ids.append(token_type_ids)
+        tokenized_attention_mask.append(attention_mask)
+
+        bar.update(i+1)
+
+    bar.finish()
+
+    return tokenized_input_ids, tokenized_token_type_ids, tokenized_attention_mask
+
+
+def preprocessing_labels(
+    labeled_headings=[],
+    sentiment_labels=[],
+    labeled_scores=[], 
+    df=[],
+    memory_size=100,
+):
+    bar = setup_progress_bar(
+        title='Preprocessing labels...',
+        maxval=memory_size * 2
+    )
+    bar.start()
+
+    for i, classification in enumerate(labeled_headings):
+        for j, score in enumerate(df[classification]):
+            if j >= memory_size:
+                break
+
+            try:
+                sentiment_labels[j]
+            except:
+                sentiment_labels.append([])
+                
+            sentiment_labels[j].append(score)
+
+    extracted_ones = []
+    for i, classifications in enumerate(sentiment_labels):
+        for j, score in enumerate(classifications):
+            if score == 1:
+                if len(extracted_ones) == i:
+                    extracted_ones.append([])
+                extracted_ones[i].append(j)
+            else:
+                if j == len(classifications) - 1 and len(extracted_ones) == i:
+                    extracted_ones.append([-1])
+    
+        bar.update(i+1)
+
+    print(extracted_ones)
+    bar.finish()
+
+    return sentiment_labels, labeled_scores
 
 
 def get_labels():
@@ -153,38 +224,45 @@ def get_features():
     return ['text']
 
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # example_sentence = 'He isn\'t as big, but he\'s still quite popular. I\'ve heard the same thing about his content. Never watched him much.'
 
 # Pretrain MobileBertTokenizer and MobileBertModel
 mobile_bert_tokenizer = MobileBertTokenizer.from_pretrained(
-    PRETRAINED_MODEL_NAME)
-mobile_bert_model = MobileBertModel.from_pretrained(PRETRAINED_MODEL_NAME)
+    config.PRETRAINED_MODEL_NAME)
+
+mobile_bert_model = MobileBertModel.from_pretrained(
+    config.PRETRAINED_MODEL_NAME)
+mobile_bert_model.to(device)
 
 # Preprocessing Data
-labels_heading = get_labels()
-features_heading = get_features()
+labels_headings = get_labels()
+features_headings = get_features()
 
-input_ids, token_type_ids, attention_mask, sentiment_labels, df = preprocessing_data(
-    features=features_heading,
-    labels=labels_heading
+input_ids, token_type_ids, attention_mask, labels = preprocessing_data(
+    features=features_headings,
+    labels=labels_headings
 )
+
+input_ids = input_ids.type(torch.LongTensor)
+attention_mask = attention_mask.type(torch.LongTensor)
+
+input_ids = input_ids.to(device)
+attention_mask = attention_mask.to(device)
 
 # Train MobileBERT model
 print('Training MobileBERT model...')
-last_hidden_states = mobile_bert_model(
-    input_ids=input_ids,
-    attention_mask=attention_mask
-)
+with torch.no_grad():
+    last_hidden_states = mobile_bert_model(
+        input_ids=input_ids,
+        attention_mask=attention_mask
+    )
 
-features = last_hidden_states[0][:,0,:].numpy()
+    features = last_hidden_states[0][:,0,:].cpu().detach().numpy()
 
-print(features)
-
-# X_train, X_test, y_train, y_test = train_test_split()
-
-# clf = SVC(kernel='linear', C=2)
-# clf.fit(x_train, x_val)
-
-# # tf.data.Dataset.
-
-# print(x_train, x_val)
+    # X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.25)
+    # print(X_train, y_train)
+    # lr_clf = LogisticRegression()
+    # lr_clf.fit(X_train, y_train)
+    # score = lr_clf.score(X_test, y_test)
+    # print(score)
