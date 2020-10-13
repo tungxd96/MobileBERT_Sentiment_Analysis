@@ -14,6 +14,7 @@ import torch
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 
+
 def setup_progress_bar(title='', maxval=0):
     if len(title) > 0:
         print(title)
@@ -87,7 +88,7 @@ def preprocessing_data(features=[], labels=[]):
                 max_length=max_length
             )
 
-            sentiment_labels, labels_score = preprocessing_labels(
+            sentiment_labels, labeled_scores = preprocessing_labels(
                 labeled_headings=labels,
                 sentiment_labels=sentiment_labels,
                 labeled_scores=labeled_scores,
@@ -127,9 +128,9 @@ def preprocessing_data(features=[], labels=[]):
 
 
 def preprocessing_features(
-    df_features=[], 
-    tokenized_input_ids=[], 
-    tokenized_token_type_ids=[], 
+    df_features=[],
+    tokenized_input_ids=[],
+    tokenized_token_type_ids=[],
     tokenized_attention_mask=[],
     memory_size=100,
     max_length=512
@@ -170,7 +171,7 @@ def preprocessing_features(
 def preprocessing_labels(
     labeled_headings=[],
     sentiment_labels=[],
-    labeled_scores=[], 
+    labeled_scores=[],
     df=[],
     memory_size=100,
 ):
@@ -189,26 +190,27 @@ def preprocessing_labels(
                 sentiment_labels[j]
             except:
                 sentiment_labels.append([])
-                
+
             sentiment_labels[j].append(score)
 
-    extracted_ones = []
     for i, classifications in enumerate(sentiment_labels):
-        for j, score in enumerate(classifications):
-            if score == 1:
-                if len(extracted_ones) == i:
-                    extracted_ones.append([])
-                extracted_ones[i].append(j)
-            else:
-                if j == len(classifications) - 1 and len(extracted_ones) == i:
-                    extracted_ones.append([-1])
-    
+        binary_score = convert_decimal_to_binary(arr=classifications)
+        labeled_scores.append(binary_score)
         bar.update(i+1)
 
-    print(extracted_ones)
     bar.finish()
 
     return sentiment_labels, labeled_scores
+
+
+def convert_decimal_to_binary(arr=[]):
+    binary = 0
+
+    for i, decimal in enumerate(arr):
+        if decimal == 1:
+            binary += pow(2, len(arr) - 1 - i)
+
+    return binary
 
 
 def get_labels():
@@ -258,11 +260,19 @@ with torch.no_grad():
         attention_mask=attention_mask
     )
 
-    features = last_hidden_states[0][:,0,:].cpu().detach().numpy()
-
-    # X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.25)
-    # print(X_train, y_train)
-    # lr_clf = LogisticRegression()
-    # lr_clf.fit(X_train, y_train)
-    # score = lr_clf.score(X_test, y_test)
-    # print(score)
+    features = last_hidden_states[0][:, 0, :].cpu().detach().numpy()
+    print(len(features), len(labels))
+    print(features[:3])
+    print(labels[:3])
+    X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.25)
+    lr_clf = LogisticRegression(
+        verbose=1,
+        solver='liblinear',
+        random_state=0,
+        C=5,
+        penalty='l2',
+        max_iter=10000
+    )
+    lr_clf.fit(X_train, y_train)
+    score = lr_clf.score(X_test, y_test)
+    print(score)

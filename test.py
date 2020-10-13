@@ -15,6 +15,7 @@ a = [[2, 131, 806, 560, 1, 3], [2, 1, 790, 1389, 666, 439, 58, 1, 35, 124, 16, 9
 b = [[0, 1, 2], [3, 4, 5]]
 # c = torch.tensor(np.array(a))
 d = tf.constant(b)
-print(d.numpy())
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(device)
+
+multi = np.c_[[0, 4]]
+print(multi)
